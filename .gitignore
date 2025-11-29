@@ -1,0 +1,49 @@
+########################
+# 🚫 DEPENDENCIES
+########################
+node_modules/
+client/node_modules/
+server/node_modules/
+
+########################
+# 🚧 BUILD FILES
+########################
+dist/
+dist-ssr/
+build/
+
+########################
+# 🔐 ENVIRONMENT
+########################
+*.env
+*.local
+
+########################
+# 📜 LOG FILES
+########################
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+########################
+# 🛠️ IDE & EDITOR FILES
+########################
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json  # Allow shared settings file
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+########################
+# 🖥️ OS GENERATED FILES
+########################
+.DS_Store
+Thumbs.db
