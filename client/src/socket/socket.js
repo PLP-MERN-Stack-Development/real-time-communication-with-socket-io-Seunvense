@@ -15,7 +15,7 @@ export const socket = io(SOCKET_URL, {
 });
 
 // Custom hook for using socket.io
-export const useSocket = () => {
+export const useSocket = (selectedUser) => {
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [lastMessage, setLastMessage] = useState(null);
   const [privateMessages, setPrivateMessages] = useState({});
@@ -72,18 +72,30 @@ export const useSocket = () => {
     // Private message events
     const onPrivateMessage = (message) => {
       console.log("Private message received:", message);
-      setLastMessage(message);
 
+      // Determine the chat partner ID (the other person)
       const partnerId =
-        message.senderId === socket.id ? message.to : message.senderId;
+        message.senderId === socket.id ? message.receiverId : message.senderId;
 
-      setPrivateMessages((prev) => ({
-        ...prev,
-        [partnerId]: [
-          ...(prev[partnerId] || []),
-          { ...message, isPrivate: true },
-        ],
-      }));
+      setPrivateMessages((prev) => {
+        const existing = prev[partnerId] || [];
+        const updated = [...existing, { ...message, isPrivate: true }];
+
+        // If we're currently viewing this chat, mark all as read
+        if (
+          selectedUser?.id ===
+          (message.senderId === socket.id
+            ? message.receiverId
+            : message.senderId)
+        ) {
+          return {
+            ...prev,
+            [partnerId]: updated.map((msg) => ({ ...msg, read: true })),
+          };
+        }
+
+        return { ...prev, [partnerId]: updated };
+      });
     };
 
     // User list & typing events
@@ -141,6 +153,7 @@ export const useSocket = () => {
     users,
     typingUsers,
     privateMessages,
+    setPrivateMessages,
     connect,
     disconnect,
     sendMessage,

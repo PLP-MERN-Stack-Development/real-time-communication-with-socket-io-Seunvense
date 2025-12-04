@@ -5,11 +5,11 @@ function App() {
   const [username, setUsername] = useState("");
   const [joined, setJoined] = useState(false);
   const [message, setMessage] = useState("");
+  const [drafts, setDrafts] = useState({}); // { "global": "hello", "user123": "hey there" }
   const [selectedUser, setSelectedUser] = useState(null); // null = global, object = private chat
 
   const {
     connect,
-    lastMessage,
     sendMessage,
     sendPrivateMessage,
     setTyping,
@@ -18,21 +18,124 @@ function App() {
     users = [],
     typingUsers = [],
     privateMessages,
-  } = useSocket();
+    setPrivateMessages,
+  } = useSocket(selectedUser);
 
   const messagesEndRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+  const scrollContainerRef = useRef(null);
+  const isUserScrolling = useRef(false);
+
+  // Define currentMessages HERE — BEFORE any useEffect that uses it!
+  const currentMessages = selectedUser
+    ? privateMessages[selectedUser?.id] || []
+    : messages.filter((msg) => !msg.isPrivate);
+
+  const chatTitle = selectedUser
+    ? `Chat with ${selectedUser.username}`
+    : "Global Chat";
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, selectedUser, privateMessages]);
+    // Don't auto-scroll if user is manually scrolling up
+    if (isUserScrolling.current) return;
+
+    const lastMsg = currentMessages[currentMessages.length - 1];
+    if (!lastMsg) return;
+
+    const myUserId = users.find((u) => u.username === username)?.id;
+    const isMyMessage = lastMsg.senderId === myUserId;
+
+    if (isMyMessage) {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        isUserScrolling.current = false; // Reset after scroll
+      }, 100);
+    }
+  }, [currentMessages.length, selectedUser, users, username]);
+
+  // PERFECT DRAFT SYSTEM — NO MORE MIXING
+  useEffect(() => {
+    // When user switches chat → save current draft + load new one
+    const saveCurrentDraft = () => {
+      const currentChatId = selectedUser?.id || "global";
+      if (message.trim() !== "") {
+        setDrafts((prev) => ({ ...prev, [currentChatId]: message }));
+      } else {
+        setDrafts((prev) => {
+          const copy = { ...prev };
+          delete copy[currentChatId];
+          return copy;
+        });
+      }
+    };
+
+    saveCurrentDraft();
+
+    // Load the draft for the NEW chat
+    const newChatId = selectedUser?.id || "global";
+    const saved = drafts[newChatId];
+    if (saved !== undefined) {
+      setMessage(saved);
+    } else {
+      setMessage("");
+    }
+  }, [selectedUser]);
+
+  // Save draft while typing (so it's never lost)
+  useEffect(() => {
+    if (!selectedUser && selectedUser !== null) return; // wait for first render
+    const chatId = selectedUser?.id || "global";
+    if (message.trim() === "") {
+      setDrafts((prev) => {
+        const copy = { ...prev };
+        delete copy[chatId];
+        return copy;
+      });
+    } else {
+      setDrafts((prev) => ({ ...prev, [chatId]: message }));
+    }
+  }, [message, selectedUser]);
+
+  useEffect(() => {
+    if (selectedUser && privateMessages[selectedUser.id]) {
+      setPrivateMessages((prev) => ({
+        ...prev,
+        [selectedUser.id]: prev[selectedUser.id].map((msg) => ({
+          ...msg,
+          read: true,
+        })),
+      }));
+    }
+  }, [selectedUser, privateMessages]);
 
   // Debounced typing (global + private)
+
   useEffect(() => {
-    if (!joined || !message) return;
-    setTyping(true);
-    const timer = setTimeout(() => setTyping(false), 1000);
-    return () => clearTimeout(timer);
-  }, [message, joined, setTyping]);
+    if (!joined || !isConnected) return;
+
+    if (message.trim()) {
+      setTyping(true);
+
+      // Clear previous timeout
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+
+      // Set new timeout to stop typing after 1 second of inactivity
+      typingTimeoutRef.current = setTimeout(() => {
+        setTyping(false);
+      }, 1000);
+    } else {
+      setTyping(false);
+    }
+
+    // Cleanup on unmount or when message becomes empty
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, [message, joined, isConnected, setTyping]);
 
   const handleJoin = (e) => {
     e.preventDefault();
@@ -46,30 +149,28 @@ function App() {
     e.preventDefault();
     if (!message.trim()) return;
 
+    // Send message
     if (selectedUser) {
-      // Private message
       sendPrivateMessage(selectedUser.id, message.trim());
     } else {
-      // Global message
       sendMessage({ message: message.trim() });
     }
-    setMessage("");
-  };
 
+    // Clear input + draft
+    setMessage("");
+    const currentChatId = selectedUser?.id || "global";
+    setDrafts((prev) => {
+      const updated = { ...prev };
+      delete updated[currentChatId];
+      return updated;
+    });
+  };
   console.log("Selected user:", selectedUser);
   console.log("Private messages:", privateMessages);
   console.log(
     "Current messages in private:",
     privateMessages[selectedUser?.id]
   );
-
-  const currentMessages = selectedUser
-    ? privateMessages[selectedUser.id] || []
-    : messages.filter((msg) => !msg.isPrivate);
-
-  const chatTitle = selectedUser
-    ? `Chat with ${selectedUser.username}`
-    : "Global Chat";
 
   if (!joined) {
     return (
@@ -101,7 +202,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 flex">
+    <div className="min-h-screen h-screen bg-gray-900 flex overflow-hidden">
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
         {/* Header */}
@@ -132,7 +233,17 @@ function App() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto p-6 space-y-4"
+          onScroll={() => {
+            if (!scrollContainerRef.current) return;
+            const { scrollTop, scrollHeight, clientHeight } =
+              scrollContainerRef.current;
+            const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+            isUserScrolling.current = distanceFromBottom > 300;
+          }}
+        >
           {currentMessages.map((msg) => {
             const isMine =
               msg?.sender === username ||
@@ -148,10 +259,10 @@ function App() {
                 <div
                   className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl ${
                     isSystem
-                      ? "bg-gray-700 text-gray-300" // System message
+                      ? "bg-gray-700 text-gray-300"
                       : isMine
-                      ? "bg-purple-600 text-white" // My message
-                      : "bg-gray-700 text-white" // Other users
+                      ? "bg-purple-600 text-white"
+                      : "bg-gray-700 text-white"
                   }`}
                 >
                   {!isMine && (
@@ -180,7 +291,6 @@ function App() {
 
           <div ref={messagesEndRef} />
         </div>
-
         {/* Input */}
         <form
           onSubmit={handleSend}
@@ -191,6 +301,17 @@ function App() {
               type="text"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setMessage("");
+                  const chatId = selectedUser?.id || "global";
+                  setDrafts((prev) => {
+                    const updated = { ...prev };
+                    delete updated[chatId];
+                    return updated;
+                  });
+                }
+              }}
               placeholder={
                 selectedUser
                   ? `Message ${selectedUser.username}...`
@@ -210,7 +331,7 @@ function App() {
       </div>
 
       {/* Users Sidebar */}
-      <div className="w-64 bg-gray-800 border-l border-gray-700 p-4">
+      <div className="w-64 bg-gray-800 border-l border-gray-700 p-4 overflow-y-auto">
         <h2 className="text-xl font-bold text-white mb-4">
           Online ({users.length})
         </h2>
@@ -223,22 +344,51 @@ function App() {
           >
             🌐 Global Chat
           </button>
+
+          {/* 🔥 FIXED PART STARTS HERE */}
           {users
             .filter((u) => u.username !== username)
             .map((user) => (
               <button
                 key={user.id}
-                onClick={() => setSelectedUser(user)}
-                className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg transition ${
+                onClick={() => {
+                  setSelectedUser(user);
+
+                  // Mark all messages from this user as read WHEN opening the chat
+                  if (privateMessages[user.id]) {
+                    setPrivateMessages((prev) => ({
+                      ...prev,
+                      [user.id]: prev[user.id].map((msg) => ({
+                        ...msg,
+                        read: true,
+                      })),
+                    }));
+                  }
+                }}
+                className={`w-full text-left flex items-center justify-between px-3 py-2 rounded-lg transition relative ${
                   selectedUser?.id === user.id
                     ? "bg-purple-600"
                     : "bg-gray-700 hover:bg-gray-600"
                 }`}
               >
-                <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
-                <span>{user.username}</span>
+                <div className="flex items-center gap-3">
+                  <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                  <span>{user.username}</span>
+                </div>
+
+                {/* Unread badge */}
+                {privateMessages[user.id]?.some((m) => !m.read) &&
+                  selectedUser?.id !== user.id && (
+                    <span className="bg-red-500 text-white text-xs font-bold rounded-full px-2 py-1 min-w-6 text-center">
+                      {
+                        privateMessages[user.id].filter((msg) => !msg.read)
+                          .length
+                      }
+                    </span>
+                  )}
               </button>
             ))}
+          {/* 🔥 FIXED PART ENDS HERE */}
         </div>
       </div>
     </div>
