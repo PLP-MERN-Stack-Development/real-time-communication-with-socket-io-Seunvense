@@ -35,6 +35,19 @@ const typingUsers = {};
 io.on("connection", (socket) => {
   console.log(`User connected: ${socket.id}`);
 
+  // Private typing indicator
+  socket.on("typing_private", ({ to, isTyping }) => {
+    const targetSocket = io.sockets.sockets.get(to);
+    if (targetSocket) {
+      targetSocket.emit("typing_private", {
+        from: socket.id,
+        isTyping,
+      });
+    }
+    // Echo back to sender so their own client knows
+    socket.emit("typing_private", { from: socket.id, isTyping });
+  });
+
   // Handle user joining
   socket.on("user_join", (username) => {
     users[socket.id] = { username, id: socket.id };
@@ -85,14 +98,25 @@ io.on("connection", (socket) => {
       id: Date.now(),
       sender: users[socket.id]?.username || "Anonymous",
       senderId: socket.id,
-      receiverId: to, // 🔥 ADD THIS
+      receiverId: to,
       message,
       timestamp: new Date().toISOString(),
       isPrivate: true,
     };
 
-    socket.to(to).emit("private_message", messageData); // Deliver to receiver
-    socket.emit("private_message", messageData); // Show it to sender too
+    // Send to receiver
+    const receiverSocket = io.sockets.sockets.get(to);
+    if (receiverSocket) {
+      receiverSocket.emit("private_message", messageData);
+      // Receiver is online → mark as delivered
+      socket.emit("message_delivered", { messageId: messageData.id });
+    } else {
+      // Receiver offline → only sender gets it (single tick)
+      socket.emit("private_message", messageData);
+    }
+
+    // Always send to sender
+    socket.emit("private_message", messageData);
   });
 
   // Handle disconnection

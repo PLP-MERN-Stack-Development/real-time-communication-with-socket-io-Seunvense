@@ -3,10 +3,8 @@
 import { io } from "socket.io-client";
 import { useEffect, useState } from "react";
 
-// Socket.io connection URL
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
 
-// Create socket instance
 export const socket = io(SOCKET_URL, {
   autoConnect: false,
   reconnection: true,
@@ -14,92 +12,90 @@ export const socket = io(SOCKET_URL, {
   reconnectionDelay: 1000,
 });
 
-// Custom hook for using socket.io
 export const useSocket = (selectedUser) => {
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [lastMessage, setLastMessage] = useState(null);
   const [privateMessages, setPrivateMessages] = useState({});
   const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
-  const [typingUsers, setTypingUsers] = useState([]);
+  const [globalTypingUsers, setGlobalTypingUsers] = useState([]);
+  const [privateTypingUsers, setPrivateTypingUsers] = useState([]);
 
-  // Connect to socket server
   const connect = (username) => {
     socket.connect();
-    if (username) {
-      socket.emit("user_join", username);
-    }
+    if (username) socket.emit("user_join", username);
   };
 
-  // Disconnect from socket server
-  const disconnect = () => {
-    socket.disconnect();
-  };
+  const disconnect = () => socket.disconnect();
 
-  // Send a message
   const sendMessage = (messageObj) => {
-    socket.emit("send_message", messageObj); // send directly
+    socket.emit("send_message", messageObj);
   };
 
-  // Send a private message
   const sendPrivateMessage = (to, message) => {
     socket.emit("private_message", { to, message });
   };
 
-  // Set typing status
   const setTyping = (isTyping) => {
-    socket.emit("typing", isTyping);
+    if (!selectedUser) {
+      socket.emit("typing", isTyping);
+    } else {
+      socket.emit("typing_private", { to: selectedUser.id, isTyping });
+    }
   };
 
-  // Socket event listeners
   useEffect(() => {
-    // Connection events
-    const onConnect = () => {
-      setIsConnected(true);
-    };
+    const onConnect = () => setIsConnected(true);
+    const onDisconnect = () => setIsConnected(false);
 
-    const onDisconnect = () => {
-      setIsConnected(false);
-    };
-
-    // Add this function 👇
     const onReceiveMessage = (message) => {
       console.log("Global message received:", message);
       setLastMessage(message);
       setMessages((prev) => [...prev, { ...message, isPrivate: false }]);
     };
 
-    // Private message events
-    const onPrivateMessage = (message) => {
-      console.log("Private message received:", message);
-
-      // Determine the chat partner ID (the other person)
-      const partnerId =
-        message.senderId === socket.id ? message.receiverId : message.senderId;
-
+    const onMessageDelivered = ({ messageId }) => {
       setPrivateMessages((prev) => {
-        const existing = prev[partnerId] || [];
-        const updated = [...existing, { ...message, isPrivate: true }];
-
-        // If we're currently viewing this chat, mark all as read
-        if (
-          selectedUser?.id ===
-          (message.senderId === socket.id
-            ? message.receiverId
-            : message.senderId)
-        ) {
-          return {
-            ...prev,
-            [partnerId]: updated.map((msg) => ({ ...msg, read: true })),
-          };
-        }
-
-        return { ...prev, [partnerId]: updated };
+        const updated = { ...prev };
+        Object.keys(updated).forEach((partnerId) => {
+          updated[partnerId] = updated[partnerId].map((msg) =>
+            msg.id === messageId ? { ...msg, delivered: true } : msg
+          );
+        });
+        return updated;
       });
     };
 
-    // User list & typing events
-    const onUserList = (userList) => setUsers(userList);
+    const onPrivateMessage = (message) => {
+      const partnerId =
+        message.senderId === socket.id ? message.receiverId : message.senderId;
+      const isCurrentlyViewing = selectedUser?.id === partnerId;
+
+      setPrivateMessages((prev) => ({
+        ...prev,
+        [partnerId]: [
+          ...(prev[partnerId] || []),
+          {
+            ...message,
+            isPrivate: true,
+            delivered: true,
+            read: isCurrentlyViewing,
+          },
+        ],
+      }));
+    };
+
+    const onUserList = (userList) => {
+      setUsers(userList);
+      // Save to localStorage
+      localStorage.setIn(
+        "knownUsers",
+        JSON.stringify(
+          userList.map((u) => ({ id: u.id, username: u.username }))
+        )
+      );
+    };
+
     const onUserJoined = (user) =>
       setMessages((prev) => [
         ...prev,
@@ -110,6 +106,7 @@ export const useSocket = (selectedUser) => {
           timestamp: new Date().toISOString(),
         },
       ]);
+
     const onUserLeft = (user) =>
       setMessages((prev) => [
         ...prev,
@@ -120,30 +117,42 @@ export const useSocket = (selectedUser) => {
           timestamp: new Date().toISOString(),
         },
       ]);
-    const onTypingUsers = (users) => setTypingUsers(users);
 
-    // 👉 Register event listeners
+    const onTypingUsers = (users) => setGlobalTypingUsers(users);
+
+    const onPrivateTyping = ({ from, isTyping }) => {
+      if (from === socket.id) return;
+      const username = users.find((u) => u.id === from)?.username;
+      if (!username || selectedUser?.id !== from) return;
+      setPrivateTypingUsers(isTyping ? [username] : []);
+    };
+
+    // Register all listeners
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
-    socket.on("receive_message", onReceiveMessage); // FIXED
+    socket.on("receive_message", onReceiveMessage);
+    socket.on("message_delivered", onMessageDelivered);
     socket.on("private_message", onPrivateMessage);
     socket.on("user_list", onUserList);
     socket.on("user_joined", onUserJoined);
     socket.on("user_left", onUserLeft);
     socket.on("typing_users", onTypingUsers);
+    socket.on("typing_private", onPrivateTyping);
 
-    // Cleanup
+    // Cleanup — ONLY ONE RETURN!
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("receive_message", onReceiveMessage);
+      socket.off("message_delivered", onMessageDelivered);
       socket.off("private_message", onPrivateMessage);
       socket.off("user_list", onUserList);
       socket.off("user_joined", onUserJoined);
       socket.off("user_left", onUserLeft);
       socket.off("typing_users", onTypingUsers);
+      socket.off("typing_private", onPrivateTyping);
     };
-  }, []);
+  }, [selectedUser, users]); // Add 'users' so typing works
 
   return {
     socket,
@@ -151,7 +160,8 @@ export const useSocket = (selectedUser) => {
     lastMessage,
     messages,
     users,
-    typingUsers,
+    globalTypingUsers,
+    privateTypingUsers,
     privateMessages,
     setPrivateMessages,
     connect,
