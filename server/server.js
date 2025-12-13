@@ -93,13 +93,13 @@ io.on("connection", (socket) => {
   });
 
   // Handle private messages
-  socket.on("private_message", ({ to, message }) => {
+  socket.on("private_message", ({ to, encrypted }) => {
     const messageData = {
       id: Date.now(),
       sender: users[socket.id]?.username || "Anonymous",
       senderId: socket.id,
       receiverId: to,
-      message,
+      encrypted,
       timestamp: new Date().toISOString(),
       isPrivate: true,
     };
@@ -108,17 +108,13 @@ io.on("connection", (socket) => {
     const receiverSocket = io.sockets.sockets.get(to);
     if (receiverSocket) {
       receiverSocket.emit("private_message", messageData);
-      // Receiver is online → mark as delivered
       socket.emit("message_delivered", { messageId: messageData.id });
     } else {
-      // Receiver offline → only sender gets it (single tick)
       socket.emit("private_message", messageData);
     }
 
-    // Always send to sender
     socket.emit("private_message", messageData);
   });
-
   // Handle disconnection
   socket.on("disconnect", () => {
     if (users[socket.id]) {

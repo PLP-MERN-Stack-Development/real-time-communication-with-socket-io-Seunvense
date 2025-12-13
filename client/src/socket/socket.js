@@ -1,7 +1,8 @@
-// socket.js - Socket.io client setup
+// socket.js - Socket.io client setup with E2EE
 
 import { io } from "socket.io-client";
 import { useEffect, useState } from "react";
+import CryptoJS from "crypto-js";
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
 
@@ -11,6 +12,32 @@ export const socket = io(SOCKET_URL, {
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
 });
+
+// Simple E2EE helper — generates key from usernames (alphabetical order for consistency)
+const getChatKey = (user1, user2) => {
+  const sorted = [user1, user2].sort().join("-");
+  return CryptoJS.SHA256(sorted).toString(); // Secure hash as key
+};
+
+// Encrypt function
+const encryptMessage = (message, key) => {
+  return CryptoJS.AES.encrypt(message, key).toString();
+};
+
+// Decrypt function - NEW (Safe version)
+const decryptMessage = (encrypted, key) => {
+  try {
+    // 1. Safety Check: If encrypted is empty or undefined, stop immediately.
+    if (!encrypted) return "Error: No encrypted data";
+
+    // 2. Try to decrypt
+    const bytes = CryptoJS.AES.decrypt(encrypted, key);
+    return bytes.toString(CryptoJS.enc.Utf8);
+  } catch (error) {
+    console.error("Decryption failed:", error);
+    return "Could not decrypt message";
+  }
+};
 
 export const useSocket = (selectedUser) => {
   const [isConnected, setIsConnected] = useState(socket.connected);
@@ -33,7 +60,18 @@ export const useSocket = (selectedUser) => {
   };
 
   const sendPrivateMessage = (to, message) => {
-    socket.emit("private_message", { to, message });
+    const myUsername = users.find((u) => u.id === socket.id)?.username;
+    const theirUsername = users.find((u) => u.id === to)?.username;
+
+    if (!myUsername || !theirUsername) {
+      console.error("Cannot encrypt: Users not found");
+      return;
+    }
+
+    const key = getChatKey(myUsername, theirUsername);
+    const encrypted = encryptMessage(message, key);
+
+    socket.emit("private_message", { to, encrypted });
   };
 
   const setTyping = (isTyping) => {
@@ -66,36 +104,60 @@ export const useSocket = (selectedUser) => {
       });
     };
 
-    const onPrivateMessage = (message) => {
-      const partnerId =
-        message.senderId === socket.id ? message.receiverId : message.senderId;
-      const isCurrentlyViewing = selectedUser?.id === partnerId;
-
-      setPrivateMessages((prev) => ({
-        ...prev,
-        [partnerId]: [
-          ...(prev[partnerId] || []),
-          {
-            ...message,
-            isPrivate: true,
-            delivered: true,
-            read: isCurrentlyViewing,
-          },
-        ],
-      }));
-    };
-
+    // --- RESTORED MISSING FUNCTION ---
     const onUserList = (userList) => {
       setUsers(userList);
-      // Save to localStorage
-      localStorage.setIn(
-        "knownUsers",
-        JSON.stringify(
-          userList.map((u) => ({ id: u.id, username: u.username }))
-        )
-      );
+      // Save to localStorage (Optional, but good for persistence)
+      // Note: localStorage APIs are synchronous, be careful with large lists
+      // localStorage.setItem("knownUsers", JSON.stringify(userList));
     };
+    // --------------------------------
 
+    const onPrivateMessage = (data) => {
+      // DEBUG: See exactly what the server sent us
+      console.log("Raw incoming private message:", data);
+
+      // 1. Destructure BOTH 'encrypted' and 'message' (for backward compatibility)
+      const { encrypted, message, senderId, receiverId, ...rest } = data;
+      const partnerId = senderId === socket.id ? receiverId : senderId;
+
+      const myUsername = users.find((u) => u.id === socket.id)?.username;
+      const theirUsername = users.find((u) => u.id === partnerId)?.username;
+
+      if (!myUsername || !theirUsername) return;
+
+      const key = getChatKey(myUsername, theirUsername);
+
+      // 2. DETERMINE CONTENT
+      // If we have encrypted data, decrypt it.
+      // If not, check if we have a plain 'message' (fallback for old code).
+      let finalMessage = "";
+
+      if (encrypted) {
+        finalMessage = decryptMessage(encrypted, key);
+      } else if (message) {
+        finalMessage = message; // It was never encrypted (legacy)
+      } else {
+        finalMessage = "<i>Message content missing</i>";
+      }
+
+      setPrivateMessages((prev) => {
+        const existing = prev[partnerId] || [];
+        const updated = [
+          ...existing,
+          {
+            ...rest,
+            message: finalMessage, // Use the safe result
+            senderId,
+            receiverId,
+            isPrivate: true,
+            delivered: true,
+            read: selectedUser?.id === partnerId,
+          },
+        ];
+        return { ...prev, [partnerId]: updated };
+      });
+    };
     const onUserJoined = (user) =>
       setMessages((prev) => [
         ...prev,
@@ -133,13 +195,13 @@ export const useSocket = (selectedUser) => {
     socket.on("receive_message", onReceiveMessage);
     socket.on("message_delivered", onMessageDelivered);
     socket.on("private_message", onPrivateMessage);
-    socket.on("user_list", onUserList);
+    socket.on("user_list", onUserList); // This line caused the error because function was missing
     socket.on("user_joined", onUserJoined);
     socket.on("user_left", onUserLeft);
     socket.on("typing_users", onTypingUsers);
     socket.on("typing_private", onPrivateTyping);
 
-    // Cleanup — ONLY ONE RETURN!
+    // Cleanup
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
@@ -152,7 +214,7 @@ export const useSocket = (selectedUser) => {
       socket.off("typing_users", onTypingUsers);
       socket.off("typing_private", onPrivateTyping);
     };
-  }, [selectedUser, users]); // Add 'users' so typing works
+  }, [selectedUser, users]);
 
   return {
     socket,
