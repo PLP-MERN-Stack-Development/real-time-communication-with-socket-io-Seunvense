@@ -1,6 +1,38 @@
 import { useEffect, useState, useRef, useLayoutEffect } from "react";
 import { useSocket } from "./socket/socket.js";
 
+// --- 0. HELPER: Generate consistent colors from usernames ---
+// EXPANDED PALETTE: 16 Colors to reduce duplicates.
+// Removed Purples. Added distinct Reds, Blues, and Earth tones.
+const USER_COLORS = [
+  "text-red-500",
+  "text-orange-400",
+  "text-amber-300",
+  "text-yellow-400",
+  "text-lime-400",
+  "text-green-500",
+  "text-emerald-400",
+  "text-teal-400",
+  "text-cyan-400",
+  "text-sky-400",
+  "text-blue-400",
+  "text-indigo-400", // Bluish-purple (kept for variety, but distinct from main purple)
+  "text-pink-400",
+  "text-rose-400",
+  "text-fuchsia-400",
+  "text-stone-400", // Grey/Beige for variety
+];
+
+const getUserColor = (username) => {
+  if (!username) return "text-gray-400";
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = username.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % USER_COLORS.length;
+  return USER_COLORS[index];
+};
+
 function App() {
   const [username, setUsername] = useState("");
   const [joined, setJoined] = useState(false);
@@ -8,7 +40,11 @@ function App() {
   const [drafts, setDrafts] = useState({});
   const [selectedUser, setSelectedUser] = useState(null);
 
-  // NEW: Track the ID of the last global message read from LocalStorage
+  // Reply State
+  const [replyingTo, setReplyingTo] = useState(null);
+
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
   const [lastReadGlobalId, setLastReadGlobalId] = useState(() => {
     return Number(localStorage.getItem("lastReadGlobalId")) || 0;
   });
@@ -33,11 +69,19 @@ function App() {
   const unreadMarkerRef = useRef(null);
   const scrollContainerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const notificationSound = useRef(null);
 
-  // Helper to get my ID safely
+  // Audio Setup
+  useEffect(() => {
+    notificationSound.current = new Audio(
+      "https://codeskulptor-demos.commondatastorage.googleapis.com/pang/pop.mp3"
+    );
+    notificationSound.current.volume = 0.5;
+  }, []);
+
   const socketId = users.find((u) => u.username === username)?.id;
 
-  // 1. Define currentMessages
+  // Define currentMessages
   const currentMessages = selectedUser
     ? privateMessages[selectedUser?.id] || []
     : messages.filter((msg) => !msg.isPrivate);
@@ -46,9 +90,8 @@ function App() {
     ? `Chat with ${selectedUser.username}`
     : "Global Chat";
 
-  // 2. SMART SCROLLING LOGIC
+  // SCROLLING LOGIC
   useLayoutEffect(() => {
-    // If unread marker exists, scroll there (center). Else scroll to bottom.
     if (unreadMarkerRef.current) {
       unreadMarkerRef.current.scrollIntoView({
         block: "center",
@@ -58,39 +101,31 @@ function App() {
       messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
     }
 
-    // Calculate unread count on open
     let unreadCount = 0;
     if (selectedUser) {
       unreadCount = currentMessages.filter(
         (m) => !m.read && m.senderId !== socketId
       ).length;
     } else {
-      // Global logic: Count messages with ID > lastReadGlobalId
       unreadCount = currentMessages.filter(
         (m) => m.id > lastReadGlobalId && m.senderId !== socketId
       ).length;
     }
     setStickyNewMsgCount(unreadCount);
-  }, [selectedUser]); // Run when chat changes
+  }, [selectedUser]);
 
-  // 3. HANDLE SCROLL & READ STATUS
+  // SCROLL & READ STATUS
   const handleScroll = () => {
     if (!scrollContainerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } =
       scrollContainerRef.current;
-
-    // Check if near bottom
     const distanceToBottom = scrollHeight - scrollTop - clientHeight;
     const isAtBottom = distanceToBottom < 50;
 
     if (isAtBottom) {
       setStickyNewMsgCount(0);
-
-      if (selectedUser) {
-        markPrivateAsRead();
-      } else {
-        markGlobalAsRead();
-      }
+      if (selectedUser) markPrivateAsRead();
+      else markGlobalAsRead();
     }
   };
 
@@ -98,7 +133,6 @@ function App() {
     if (selectedUser && privateMessages[selectedUser.id]) {
       const hasUnread = privateMessages[selectedUser.id].some((m) => !m.read);
       if (!hasUnread) return;
-
       setPrivateMessages((prev) => ({
         ...prev,
         [selectedUser.id]: prev[selectedUser.id].map((msg) => ({
@@ -112,15 +146,22 @@ function App() {
   const markGlobalAsRead = () => {
     if (currentMessages.length === 0) return;
     const lastMsgId = currentMessages[currentMessages.length - 1].id;
-
-    // Only update if we have actually advanced
     if (lastMsgId > lastReadGlobalId) {
       setLastReadGlobalId(lastMsgId);
       localStorage.setItem("lastReadGlobalId", lastMsgId);
     }
   };
 
-  // 4. HANDLE INCOMING MESSAGES (Update Sticky Count)
+  const scrollToMessage = (id) => {
+    const element = document.getElementById(`msg-${id}`);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      element.classList.add("bg-gray-600");
+      setTimeout(() => element.classList.remove("bg-gray-600"), 1000);
+    }
+  };
+
+  // --- HANDLE INCOMING MESSAGES ---
   useEffect(() => {
     if (!scrollContainerRef.current) return;
     const lastMsg = currentMessages[currentMessages.length - 1];
@@ -133,16 +174,22 @@ function App() {
 
     if (isMyMessage || isNearBottom) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      // If we are at bottom, mark as read immediately
       if (!selectedUser) markGlobalAsRead();
     } else {
-      // If we are scrolled up, increase count
       setStickyNewMsgCount((prev) => prev + 1);
+
+      if (soundEnabled && !isMyMessage) {
+        if (notificationSound.current) {
+          notificationSound.current.currentTime = 0;
+          notificationSound.current.play().catch(() => {});
+        }
+      }
     }
   }, [currentMessages.length]);
 
-  // --- DRAFT & TYPING LOGIC (Standard) ---
+  // DRAFT LOGIC
   useEffect(() => {
+    setReplyingTo(null);
     const saveCurrentDraft = () => {
       const currentChatId = selectedUser?.id || "global";
       if (message.trim() !== "") {
@@ -175,6 +222,7 @@ function App() {
     }
   }, [message, selectedUser]);
 
+  // TYPING LOGIC
   useEffect(() => {
     if (!joined || !isConnected) return;
     if (message.trim()) {
@@ -200,13 +248,21 @@ function App() {
   const handleSend = (e) => {
     e.preventDefault();
     if (!message.trim()) return;
+
+    const payload = {
+      message: message.trim(),
+      replyTo: replyingTo,
+    };
+
     if (selectedUser) {
+      // Sending simple text for private to match current encryption logic
       sendPrivateMessage(selectedUser.id, message.trim());
     } else {
-      sendMessage({ message: message.trim() });
+      sendMessage(payload);
     }
+
     setMessage("");
-    // Manually scroll to bottom on send and update global read
+    setReplyingTo(null);
     setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
       if (!selectedUser) markGlobalAsRead();
@@ -258,6 +314,13 @@ function App() {
             <h1 className="text-2xl font-bold text-white">{chatTitle}</h1>
           </div>
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className="text-gray-400 hover:text-white transition-colors p-2"
+              title={soundEnabled ? "Mute Sound" : "Enable Sound"}
+            >
+              {soundEnabled ? "🔊" : "🔇"}
+            </button>
             <span className="text-green-400 flex items-center gap-2">
               <span className="w-3 h-3 bg-green-400 rounded-full animate-ping"></span>{" "}
               Connected
@@ -282,37 +345,29 @@ function App() {
               msg?.sender === username || msg?.senderId === socketId;
             const isSystem = msg?.system === true;
 
-            // --- DETERMINING UNREAD STATUS ---
+            const userColor = getUserColor(msg?.sender);
+
             let isUnread = false;
             if (selectedUser) {
-              // Private: Rely on server 'read' flag
               isUnread = !msg.read && !isMine;
             } else {
-              // Global: Compare ID with local storage
               isUnread = msg.id > lastReadGlobalId && !isMine;
             }
 
-            // Determine if this is the FIRST unread message to draw the line
             const prevMsg = currentMessages[index - 1];
-
             let isFirstUnread = false;
             if (isUnread) {
-              if (!prevMsg) {
-                isFirstUnread = true; // First message ever and it's unread
-              } else if (selectedUser) {
-                // Private: prev was read or mine
+              if (!prevMsg) isFirstUnread = true;
+              else if (selectedUser)
                 isFirstUnread = prevMsg.read || prevMsg.senderId === socketId;
-              } else {
-                // Global: prev ID was <= lastReadGlobalId or mine
+              else
                 isFirstUnread =
                   prevMsg.id <= lastReadGlobalId ||
                   prevMsg.senderId === socketId;
-              }
             }
 
             return (
-              <div key={msg.id || index}>
-                {/* THE UNREAD DIVIDER */}
+              <div key={msg.id || index} id={`msg-${msg.id}`}>
                 {isFirstUnread && (
                   <div ref={unreadMarkerRef} className="flex items-center my-6">
                     <div className="flex-grow h-px bg-red-500/50"></div>
@@ -327,7 +382,7 @@ function App() {
                   className={`flex ${isMine ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl ${
+                    className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl relative group ${
                       isSystem
                         ? "bg-gray-700 text-gray-300"
                         : isMine
@@ -335,12 +390,49 @@ function App() {
                         : "bg-gray-700 text-white"
                     }`}
                   >
-                    {!isMine && (
-                      <div className="text-xs opacity-70 mb-1">
+                    {!isSystem && (
+                      <button
+                        onClick={() => setReplyingTo(msg)}
+                        className={`absolute -top-3 ${
+                          isMine ? "-left-3" : "-right-3"
+                        } 
+                            bg-gray-600 p-1.5 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity text-white text-xs`}
+                        title="Reply"
+                      >
+                        ↩️
+                      </button>
+                    )}
+
+                    {msg.replyTo && (
+                      <div
+                        onClick={() => scrollToMessage(msg.replyTo.id)}
+                        className={`mb-2 p-2 rounded text-xs cursor-pointer border-l-4 ${
+                          isMine
+                            ? "bg-purple-700 border-purple-300"
+                            : "bg-gray-800 border-gray-500"
+                        }`}
+                      >
+                        <span
+                          className={`font-bold ${getUserColor(
+                            msg.replyTo.sender
+                          )}`}
+                        >
+                          {msg.replyTo.sender}
+                        </span>
+                        <p className="opacity-70 truncate">
+                          {msg.replyTo.message}
+                        </p>
+                      </div>
+                    )}
+
+                    {!isMine && !isSystem && (
+                      <div className={`text-xs font-bold mb-1 ${userColor}`}>
                         {msg?.sender || "User"}
                       </div>
                     )}
+
                     <div>{msg?.message}</div>
+
                     <div className="text-xs opacity-70 mt-1 flex items-center gap-1 justify-end">
                       {msg.timestamp
                         ? new Date(msg.timestamp).toLocaleTimeString([], {
@@ -351,7 +443,6 @@ function App() {
                       {isMine && (
                         <div className="flex items-center">
                           <span className="text-white opacity-70">✓</span>
-                          {/* Global doesn't support delivered/read ticks from server properly yet, so we hide specific ticks for global unless you add backend logic */}
                           {selectedUser && msg.delivered && !msg.read && (
                             <span className="text-white opacity-70 -ml-2">
                               ✓✓
@@ -369,16 +460,18 @@ function App() {
             );
           })}
 
+          {/* --- RESTORED TYPING INDICATORS --- */}
           {!selectedUser && globalTypingUsers.length > 0 && (
-            <div className="text-gray-400 italic text-sm">
+            <div className="text-gray-400 italic text-sm ml-4 mb-2">
               {globalTypingUsers.join(", ")} is typing...
             </div>
           )}
           {selectedUser && privateTypingUsers.length > 0 && (
-            <div className="text-gray-400 italic text-sm">
+            <div className="text-gray-400 italic text-sm ml-4 mb-2">
               {selectedUser.username} is typing...
             </div>
           )}
+          {/* ---------------------------------- */}
 
           <div ref={messagesEndRef} />
         </div>
@@ -403,13 +496,40 @@ function App() {
           onSubmit={handleSend}
           className="bg-gray-800 p-4 border-t border-gray-700"
         >
+          {replyingTo && (
+            <div className="flex justify-between items-center bg-gray-700 p-2 rounded-t-lg mb-1 border-l-4 border-purple-500">
+              <div className="text-sm text-gray-300">
+                Replying to{" "}
+                <span
+                  className={`font-bold ${getUserColor(replyingTo.sender)}`}
+                >
+                  {replyingTo.sender}
+                </span>
+                :
+                <span className="ml-2 opacity-70 truncate block max-w-xs">
+                  {replyingTo.message}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyingTo(null)}
+                className="text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <div className="flex gap-3">
             <input
               type="text"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Escape") setMessage("");
+                if (e.key === "Escape") {
+                  setMessage("");
+                  setReplyingTo(null);
+                }
               }}
               placeholder={
                 selectedUser
@@ -442,7 +562,6 @@ function App() {
             } transition`}
           >
             <span>🌐 Global Chat</span>
-            {/* Global Unread Badge in Sidebar */}
             {messages.filter(
               (m) => m.id > lastReadGlobalId && m.senderId !== socketId
             ).length > 0 &&
@@ -469,8 +588,16 @@ function App() {
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
-                  <span>{user.username}</span>
+                  <div
+                    className={`w-3 h-3 rounded-full animate-pulse bg-current ${getUserColor(
+                      user.username
+                    )}`}
+                  ></div>
+                  <span
+                    className={`${getUserColor(user.username)} font-medium`}
+                  >
+                    {user.username}
+                  </span>
                 </div>
                 {privateMessages[user.id]?.some((m) => !m.read) &&
                   selectedUser?.id !== user.id && (
