@@ -2,8 +2,6 @@ import { useEffect, useState, useRef, useLayoutEffect } from "react";
 import { useSocket } from "./socket/socket.js";
 
 // --- 0. HELPER: Generate consistent colors from usernames ---
-// EXPANDED PALETTE: 16 Colors to reduce duplicates.
-// Removed Purples. Added distinct Reds, Blues, and Earth tones.
 const USER_COLORS = [
   "text-red-500",
   "text-orange-400",
@@ -16,11 +14,11 @@ const USER_COLORS = [
   "text-cyan-400",
   "text-sky-400",
   "text-blue-400",
-  "text-indigo-400", // Bluish-purple (kept for variety, but distinct from main purple)
+  "text-indigo-400",
   "text-pink-400",
   "text-rose-400",
   "text-fuchsia-400",
-  "text-stone-400", // Grey/Beige for variety
+  "text-stone-400",
 ];
 
 const getUserColor = (username) => {
@@ -33,16 +31,19 @@ const getUserColor = (username) => {
   return USER_COLORS[index];
 };
 
+const EMOJIS = {
+  common: ["❤️", "👍", "😂", "😮", "😢", "😡"],
+  love: ["💋", "🥵", "🍆", "🍑", "💦", "🥺"],
+  school: ["📚", "🎓", "🧠", "💯"],
+};
+
 function App() {
   const [username, setUsername] = useState("");
   const [joined, setJoined] = useState(false);
   const [message, setMessage] = useState("");
   const [drafts, setDrafts] = useState({});
   const [selectedUser, setSelectedUser] = useState(null);
-
-  // Reply State
   const [replyingTo, setReplyingTo] = useState(null);
-
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const [lastReadGlobalId, setLastReadGlobalId] = useState(() => {
@@ -55,6 +56,7 @@ function App() {
     connect,
     sendMessage,
     sendPrivateMessage,
+    sendReaction,
     setTyping,
     isConnected,
     messages = [],
@@ -71,7 +73,6 @@ function App() {
   const typingTimeoutRef = useRef(null);
   const notificationSound = useRef(null);
 
-  // Audio Setup
   useEffect(() => {
     notificationSound.current = new Audio(
       "https://codeskulptor-demos.commondatastorage.googleapis.com/pang/pop.mp3"
@@ -81,7 +82,6 @@ function App() {
 
   const socketId = users.find((u) => u.username === username)?.id;
 
-  // Define currentMessages
   const currentMessages = selectedUser
     ? privateMessages[selectedUser?.id] || []
     : messages.filter((msg) => !msg.isPrivate);
@@ -90,7 +90,6 @@ function App() {
     ? `Chat with ${selectedUser.username}`
     : "Global Chat";
 
-  // SCROLLING LOGIC
   useLayoutEffect(() => {
     if (unreadMarkerRef.current) {
       unreadMarkerRef.current.scrollIntoView({
@@ -114,7 +113,6 @@ function App() {
     setStickyNewMsgCount(unreadCount);
   }, [selectedUser]);
 
-  // SCROLL & READ STATUS
   const handleScroll = () => {
     if (!scrollContainerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } =
@@ -161,7 +159,6 @@ function App() {
     }
   };
 
-  // --- HANDLE INCOMING MESSAGES ---
   useEffect(() => {
     if (!scrollContainerRef.current) return;
     const lastMsg = currentMessages[currentMessages.length - 1];
@@ -177,7 +174,6 @@ function App() {
       if (!selectedUser) markGlobalAsRead();
     } else {
       setStickyNewMsgCount((prev) => prev + 1);
-
       if (soundEnabled && !isMyMessage) {
         if (notificationSound.current) {
           notificationSound.current.currentTime = 0;
@@ -187,7 +183,6 @@ function App() {
     }
   }, [currentMessages.length]);
 
-  // DRAFT LOGIC
   useEffect(() => {
     setReplyingTo(null);
     const saveCurrentDraft = () => {
@@ -222,7 +217,6 @@ function App() {
     }
   }, [message, selectedUser]);
 
-  // TYPING LOGIC
   useEffect(() => {
     if (!joined || !isConnected) return;
     if (message.trim()) {
@@ -249,14 +243,16 @@ function App() {
     e.preventDefault();
     if (!message.trim()) return;
 
+    // --- FIX: STRUCTURE THE PAYLOAD FOR PRIVATE & GLOBAL ---
+    // The structure needs to be consistent for socket.js to stringify it
     const payload = {
       message: message.trim(),
       replyTo: replyingTo,
     };
 
     if (selectedUser) {
-      // Sending simple text for private to match current encryption logic
-      sendPrivateMessage(selectedUser.id, message.trim());
+      // socket.js now handles the object stringification + encryption
+      sendPrivateMessage(selectedUser.id, payload);
     } else {
       sendMessage(payload);
     }
@@ -344,15 +340,11 @@ function App() {
             const isMine =
               msg?.sender === username || msg?.senderId === socketId;
             const isSystem = msg?.system === true;
-
             const userColor = getUserColor(msg?.sender);
 
             let isUnread = false;
-            if (selectedUser) {
-              isUnread = !msg.read && !isMine;
-            } else {
-              isUnread = msg.id > lastReadGlobalId && !isMine;
-            }
+            if (selectedUser) isUnread = !msg.read && !isMine;
+            else isUnread = msg.id > lastReadGlobalId && !isMine;
 
             const prevMsg = currentMessages[index - 1];
             let isFirstUnread = false;
@@ -379,88 +371,173 @@ function App() {
                 )}
 
                 <div
-                  className={`flex ${isMine ? "justify-end" : "justify-start"}`}
+                  className={`flex ${
+                    isMine ? "justify-end" : "justify-start"
+                  } mb-2`}
                 >
-                  <div
-                    className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl relative group ${
-                      isSystem
-                        ? "bg-gray-700 text-gray-300"
-                        : isMine
-                        ? "bg-purple-600 text-white"
-                        : "bg-gray-700 text-white"
-                    }`}
-                  >
+                  {/* --- NEW: Relative Container for Message + Interactions --- */}
+                  <div className="relative group max-w-xs lg:max-w-md">
+                    {/* 1. INTERACTION MENU (Hover Trigger) */}
                     {!isSystem && (
-                      <button
-                        onClick={() => setReplyingTo(msg)}
-                        className={`absolute -top-3 ${
-                          isMine ? "-left-3" : "-right-3"
-                        } 
-                            bg-gray-600 p-1.5 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity text-white text-xs`}
-                        title="Reply"
-                      >
-                        ↩️
-                      </button>
-                    )}
-
-                    {msg.replyTo && (
                       <div
-                        onClick={() => scrollToMessage(msg.replyTo.id)}
-                        className={`mb-2 p-2 rounded text-xs cursor-pointer border-l-4 ${
-                          isMine
-                            ? "bg-purple-700 border-purple-300"
-                            : "bg-gray-800 border-gray-500"
-                        }`}
+                        className={`absolute top-1/2 -translate-y-1/2 z-20 
+                        ${isMine ? "-left-10" : "-right-10"} 
+                        opacity-0 group-hover:opacity-100 transition-all duration-200`}
                       >
-                        <span
-                          className={`font-bold ${getUserColor(
-                            msg.replyTo.sender
-                          )}`}
+                        {/* The "Trigger" Button (Smiley) */}
+                        <div className="relative group/emoji">
+                          <button className="text-gray-400 hover:text-white bg-gray-800 p-1.5 rounded-full shadow-md text-sm">
+                            ☺
+                          </button>
+
+                          {/* The Pop-out Emoji Picker (Appears on hover of Smiley) */}
+                          <div
+                            className={`absolute bottom-full mb-2 ${
+                              isMine ? "left-0" : "right-0"
+                            } 
+                                hidden group-hover/emoji:flex flex-col gap-2 bg-gray-800 p-2 rounded-lg border border-gray-700 shadow-xl w-max`}
+                          >
+                            <div className="flex gap-1">
+                              {EMOJIS.common.map((e) => (
+                                <button
+                                  key={e}
+                                  onClick={() => sendReaction(msg.id, e)}
+                                  className="hover:scale-125 transition text-lg"
+                                >
+                                  {e}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="flex gap-1 pt-1 border-t border-gray-600">
+                              {EMOJIS.love.map((e) => (
+                                <button
+                                  key={e}
+                                  onClick={() => sendReaction(msg.id, e)}
+                                  className="hover:scale-125 transition text-lg"
+                                >
+                                  {e}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="flex gap-1 pt-1 border-t border-gray-600">
+                              {EMOJIS.school.map((e) => (
+                                <button
+                                  key={e}
+                                  onClick={() => sendReaction(msg.id, e)}
+                                  className="hover:scale-125 transition text-lg"
+                                >
+                                  {e}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Reply Button (Next to Smiley) */}
+                        <button
+                          onClick={() => setReplyingTo(msg)}
+                          className="text-gray-400 hover:text-white bg-gray-800 p-1.5 rounded-full shadow-md text-xs mt-2 block"
+                          title="Reply"
                         >
-                          {msg.replyTo.sender}
-                        </span>
-                        <p className="opacity-70 truncate">
-                          {msg.replyTo.message}
-                        </p>
+                          ↩️
+                        </button>
                       </div>
                     )}
 
-                    {!isMine && !isSystem && (
-                      <div className={`text-xs font-bold mb-1 ${userColor}`}>
-                        {msg?.sender || "User"}
-                      </div>
-                    )}
-
-                    <div>{msg?.message}</div>
-
-                    <div className="text-xs opacity-70 mt-1 flex items-center gap-1 justify-end">
-                      {msg.timestamp
-                        ? new Date(msg.timestamp).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : ""}
-                      {isMine && (
-                        <div className="flex items-center">
-                          <span className="text-white opacity-70">✓</span>
-                          {selectedUser && msg.delivered && !msg.read && (
-                            <span className="text-white opacity-70 -ml-2">
-                              ✓✓
-                            </span>
-                          )}
-                          {selectedUser && msg.read && (
-                            <span className="text-cyan-400 -ml-2">✓✓</span>
-                          )}
+                    {/* 2. THE MESSAGE BUBBLE */}
+                    <div
+                      className={`px-4 py-3 rounded-2xl shadow-sm border border-transparent 
+                        ${
+                          isSystem
+                            ? "bg-gray-700 text-gray-300"
+                            : isMine
+                            ? "bg-purple-600 text-white"
+                            : "bg-gray-700 text-white"
+                        }`}
+                    >
+                      {/* Reply Preview */}
+                      {msg.replyTo && (
+                        <div
+                          onClick={() => scrollToMessage(msg.replyTo.id)}
+                          className={`mb-2 p-2 rounded text-xs cursor-pointer border-l-4 bg-black/20 ${
+                            isMine ? "border-purple-300" : "border-gray-500"
+                          }`}
+                        >
+                          <span
+                            className={`font-bold ${getUserColor(
+                              msg.replyTo.sender
+                            )}`}
+                          >
+                            {msg.replyTo.sender}
+                          </span>
+                          <p className="opacity-70 truncate">
+                            {msg.replyTo.message}
+                          </p>
                         </div>
                       )}
+
+                      {/* Sender Name */}
+                      {!isMine && !isSystem && (
+                        <div className={`text-xs font-bold mb-1 ${userColor}`}>
+                          {msg?.sender || "User"}
+                        </div>
+                      )}
+
+                      {/* Text */}
+                      <div className="whitespace-pre-wrap break-words">
+                        {msg?.message}
+                      </div>
+
+                      {/* Timestamp */}
+                      <div className="text-[10px] opacity-70 mt-1 flex items-center gap-1 justify-end">
+                        {msg.timestamp
+                          ? new Date(msg.timestamp).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : ""}
+                        {isMine && (
+                          <div className="flex items-center">
+                            <span className="text-white opacity-70">✓</span>
+                            {selectedUser && msg.delivered && !msg.read && (
+                              <span className="text-white opacity-70 -ml-1">
+                                ✓✓
+                              </span>
+                            )}
+                            {selectedUser && msg.read && (
+                              <span className="text-cyan-400 -ml-1">✓✓</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
+
+                    {/* 3. REACTIONS PILLS (Attached to bottom of bubble) */}
+                    {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                      <div
+                        className={`absolute -bottom-3 ${
+                          isMine ? "right-4" : "left-4"
+                        } flex gap-1 z-10`}
+                      >
+                        {Object.entries(msg.reactions).map(([emoji, users]) => (
+                          <div
+                            key={emoji}
+                            className="bg-gray-800 text-white text-[10px] px-1.5 py-0.5 rounded-full border border-gray-600 shadow flex items-center gap-1"
+                          >
+                            <span>{emoji}</span>
+                            {users.length > 1 && (
+                              <span className="font-bold">{users.length}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             );
           })}
 
-          {/* --- RESTORED TYPING INDICATORS --- */}
           {!selectedUser && globalTypingUsers.length > 0 && (
             <div className="text-gray-400 italic text-sm ml-4 mb-2">
               {globalTypingUsers.join(", ")} is typing...
@@ -471,12 +548,10 @@ function App() {
               {selectedUser.username} is typing...
             </div>
           )}
-          {/* ---------------------------------- */}
 
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Dynamic New Message Indicator */}
         {stickyNewMsgCount > 0 && (
           <button
             onClick={() => {
