@@ -546,7 +546,7 @@ function App() {
       <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center">
         <div className="bg-white rounded-2xl shadow-2xl p-10 w-96">
           <h1 className="text-4xl font-bold text-center mb-8 text-gray-800">
-            Socket.io Chat
+            StarApp
           </h1>
           <form onSubmit={handleJoin}>
             <input
