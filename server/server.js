@@ -1,4 +1,4 @@
-// server.js - Socket.io chat server with Reactions
+// server.js - Socket.io Server with 50MB File Support
 
 const express = require("express");
 const http = require("http");
@@ -12,6 +12,8 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
+  // Increase limit to 50MB for files
+  maxHttpBufferSize: 50 * 1024 * 1024,
   cors: {
     origin: process.env.CLIENT_URL || "http://localhost:5173",
     methods: ["GET", "POST"],
@@ -24,36 +26,35 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 const users = {};
-const messages = []; // Global messages storage
+const messages = [];
 const typingUsers = {};
 
 io.on("connection", (socket) => {
   console.log(`User connected: ${socket.id}`);
 
-  // --- 1. NEW: Reaction Handler ---
+  // --- NEW: Delete Message Handler (MOVED INSIDE) ---
+  socket.on("delete_message", (messageId) => {
+    const index = messages.findIndex((m) => m.id === messageId);
+    if (index !== -1) {
+      messages.splice(index, 1); // Remove from server memory
+      io.emit("message_deleted", messageId); // Tell everyone to remove it
+    }
+  });
+
+  // Reaction Handler
   socket.on("add_reaction", ({ messageId, emoji, to }) => {
-    // A. Private Chat Reaction
     if (to) {
       const reactionData = { messageId, emoji, reactorId: socket.id };
-      // Send to the other person
       io.to(to).emit("private_reaction", reactionData);
-      // Send back to yourself (so your UI updates)
       socket.emit("private_reaction", reactionData);
-    }
-    // B. Global Chat Reaction
-    else {
+    } else {
       const msg = messages.find((m) => m.id === messageId);
       if (msg) {
-        // Initialize reactions object if missing
         if (!msg.reactions) msg.reactions = {};
         if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
-
-        // Add user if they haven't reacted with this emoji yet
         if (!msg.reactions[emoji].includes(socket.id)) {
           msg.reactions[emoji].push(socket.id);
         }
-
-        // Broadcast updated reactions to everyone
         io.emit("global_reaction_update", {
           messageId,
           reactions: msg.reactions,
@@ -61,8 +62,6 @@ io.on("connection", (socket) => {
       }
     }
   });
-
-  // --- Existing Logic Below ---
 
   socket.on("typing_private", ({ to, isTyping }) => {
     const targetSocket = io.sockets.sockets.get(to);
@@ -86,7 +85,7 @@ io.on("connection", (socket) => {
       sender: users[socket.id]?.username || "Anonymous",
       senderId: socket.id,
       timestamp: new Date().toISOString(),
-      reactions: {}, // Initialize empty reactions
+      reactions: {},
     };
     messages.push(message);
     if (messages.length > 100) messages.shift();
@@ -111,7 +110,7 @@ io.on("connection", (socket) => {
       encrypted,
       timestamp: new Date().toISOString(),
       isPrivate: true,
-      reactions: {}, // Initialize empty reactions
+      reactions: {},
     };
 
     const receiverSocket = io.sockets.sockets.get(to);
@@ -121,6 +120,7 @@ io.on("connection", (socket) => {
     } else {
       socket.emit("private_message", messageData);
     }
+    // Always send back to sender so they see it instantly
     socket.emit("private_message", messageData);
   });
 

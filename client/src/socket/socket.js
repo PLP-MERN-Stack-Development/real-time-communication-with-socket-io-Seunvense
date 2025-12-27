@@ -53,6 +53,11 @@ export const useSocket = (selectedUser) => {
     socket.emit("send_message", messageObj);
   };
 
+  // --- NEW: Delete Function ---
+  const deleteMessage = (messageId) => {
+    socket.emit("delete_message", messageId);
+  };
+
   const sendReaction = (messageId, emoji) => {
     const to = selectedUser ? selectedUser.id : null;
     socket.emit("add_reaction", { messageId, emoji, to });
@@ -92,6 +97,23 @@ export const useSocket = (selectedUser) => {
     const onReceiveMessage = (message) => {
       setLastMessage(message);
       setMessages((prev) => [...prev, { ...message, isPrivate: false }]);
+    };
+
+    // --- NEW: Listener for Deletion ---
+    const onMessageDeleted = (messageId) => {
+      // Remove from Global state
+      setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
+
+      // Remove from Private state
+      setPrivateMessages((prev) => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach((userId) => {
+          updated[userId] = updated[userId].filter(
+            (msg) => msg.id !== messageId
+          );
+        });
+        return updated;
+      });
     };
 
     const onMessageDelivered = ({ messageId }) => {
@@ -229,6 +251,7 @@ export const useSocket = (selectedUser) => {
     socket.on("receive_message", onReceiveMessage);
     socket.on("message_delivered", onMessageDelivered);
     socket.on("private_message", onPrivateMessage);
+    socket.on("message_deleted", onMessageDeleted);
     socket.on("user_list", onUserList);
     socket.on("user_joined", onUserJoined);
     socket.on("user_left", onUserLeft);
@@ -243,6 +266,7 @@ export const useSocket = (selectedUser) => {
       socket.off("receive_message", onReceiveMessage);
       socket.off("message_delivered", onMessageDelivered);
       socket.off("private_message", onPrivateMessage);
+      socket.off("message_deleted", onMessageDeleted);
       socket.off("user_list", onUserList);
       socket.off("user_joined", onUserJoined);
       socket.off("user_left", onUserLeft);
@@ -265,6 +289,7 @@ export const useSocket = (selectedUser) => {
     connect,
     disconnect,
     sendMessage,
+    deleteMessage,
     sendPrivateMessage,
     setTyping,
     sendReaction,

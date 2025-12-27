@@ -1,77 +1,51 @@
-# Real-Time Chat Application with Socket.io
+# Socket.io Real-Time Chat Application
 
-This assignment focuses on building a real-time chat application using Socket.io, implementing bidirectional communication between clients and server.
+A full-featured, secure, real-time chat application built with **React**, **Socket.io**, and **Node.js**. Supports global and private messaging with modern features like end-to-end encryption, reactions, voice notes, file sharing, and more.
 
-## Assignment Overview
+**Live Demo:** _(Add after deployment)_  
+Client: https://your-app.vercel.app  
+Server: https://your-app.onrender.com
 
-You will build a chat application with the following features:
-1. Real-time messaging using Socket.io
-2. User authentication and presence
-3. Multiple chat rooms or private messaging
-4. Real-time notifications
-5. Advanced features like typing indicators and read receipts
+## Features
 
-## Project Structure
+- **Real-time Global & Private Chat**
+- **End-to-End Encryption** for private messages (AES via CryptoJS)
+- **Typing Indicators** (per chat)
+- **Read Receipts** (✓ delivered, ✓✓ read, blue ticks)
+- **Unread Message Count** with divider line and "new messages" button
+- **Message Replies** with preview
+- **Message Reactions** (❤️ 👍 😂 + custom categories)
+- **Voice Notes** with live recording
+- **File Sharing** (Images, Videos, Audio, Documents up to 50MB)
+  - Inline image preview
+  - Video/audio playback
+  - Download links
+- **YouTube & Video Link Embedding** (play directly in chat)
+- **Sound Notifications** with mute toggle
+- **Delete Messages** (your own)
+- **Copy Message Text**
+- **Drafts** preserved when switching chats
+- **Color-coded Usernames**
+- **Responsive & Modern UI** with Tailwind CSS
 
-```
-socketio-chat/
-├── client/                 # React front-end
-│   ├── public/             # Static files
-│   ├── src/                # React source code
-│   │   ├── components/     # UI components
-│   │   ├── context/        # React context providers
-│   │   ├── hooks/          # Custom React hooks
-│   │   ├── pages/          # Page components
-│   │   ├── socket/         # Socket.io client setup
-│   │   └── App.jsx         # Main application component
-│   └── package.json        # Client dependencies
-├── server/                 # Node.js back-end
-│   ├── config/             # Configuration files
-│   ├── controllers/        # Socket event handlers
-│   ├── models/             # Data models
-│   ├── socket/             # Socket.io server setup
-│   ├── utils/              # Utility functions
-│   ├── server.js           # Main server file
-│   └── package.json        # Server dependencies
-└── README.md               # Project documentation
-```
+## Tech Stack
 
-## Getting Started
+- **Frontend:** React + Vite + Tailwind CSS + ReactPlayer
+- **Backend:** Node.js + Express + Socket.io
+- **Encryption:** CryptoJS (AES)
+- **Deployment:** Vercel (client) + Render (server)
 
-1. Accept the GitHub Classroom assignment invitation
-2. Clone your personal repository that was created by GitHub Classroom
-3. Follow the setup instructions in the `Week5-Assignment.md` file
-4. Complete the tasks outlined in the assignment
+## Setup Instructions
 
-## Files Included
+### Prerequisites
 
-- `Week5-Assignment.md`: Detailed assignment instructions
-- Starter code for both client and server:
-  - Basic project structure
-  - Socket.io configuration templates
-  - Sample components for the chat interface
-
-## Requirements
-
-- Node.js (v18 or higher)
+- Node.js (v18+)
 - npm or yarn
-- Modern web browser
-- Basic understanding of React and Express
 
-## Submission
+### Local Development
 
-Your work will be automatically submitted when you push to your GitHub Classroom repository. Make sure to:
-
-1. Complete both the client and server portions of the application
-2. Implement the core chat functionality
-3. Add at least 3 advanced features
-4. Document your setup process and features in the README.md
-5. Include screenshots or GIFs of your working application
-6. Optional: Deploy your application and add the URLs to your README.md
-
-## Resources
-
-- [Socket.io Documentation](https://socket.io/docs/v4/)
-- [React Documentation](https://react.dev/)
-- [Express.js Documentation](https://expressjs.com/)
-- [Building a Chat Application with Socket.io](https://socket.io/get-started/chat) 
+1. Clone the repository
+   ```bash
+   git clone https://github.com/your-username/your-repo-name.git
+   cd your-repo-name
+   ```
