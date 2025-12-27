@@ -11,17 +11,31 @@ dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
+
+// 1. Setup Allowed Origins (Localhost + Production URL)
+const allowedOrigins = [
+  "http://localhost:5173", // For local development
+  process.env.CLIENT_URL, // For production (e.g., https://my-chat-app.vercel.app)
+].filter(Boolean); // Filters out empty values if env variable isn't set
+
 const io = new Server(server, {
   // Increase limit to 50MB for files
   maxHttpBufferSize: 50 * 1024 * 1024,
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true,
   },
 });
 
-app.use(cors());
+// 2. Apply CORS to Express routes as well (so API calls don't fail)
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -147,7 +161,9 @@ app.get("/", (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
+
+// 3. Bind to 0.0.0.0 for Render
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
 

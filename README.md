@@ -45,7 +45,36 @@ Server: https://your-app.onrender.com
 ### Local Development
 
 1. Clone the repository
+
    ```bash
    git clone https://github.com/your-username/your-repo-name.git
    cd your-repo-name
    ```
+
+2. Install dependencies
+
+# Server
+
+cd server
+npm install
+
+# Client (in another terminal)
+
+cd client
+npm install
+
+3. Start the server
+
+cd server
+npm start
+
+# Runs on http://localhost:5000
+
+4. Start the client
+
+cd client
+npm run dev
+
+# Runs on http://localhost:5173
+
+5. Open browser and join with any username
