@@ -4,7 +4,12 @@ import { io } from "socket.io-client";
 import { useEffect, useState } from "react";
 import CryptoJS from "crypto-js";
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
+// --- CHANGE: Dynamic URL Selection ---
+// 1. If VITE_SOCKET_URL is set in .env, use it.
+// 2. Otherwise, default to your Render URL for production.
+// 3. Keep localhost as a fallback only for local dev if .env is missing.
+const SOCKET_URL =
+  import.meta.env.VITE_SOCKET_URL || "https://starapp-c5h0.onrender.com";
 
 export const socket = io(SOCKET_URL, {
   autoConnect: false,
@@ -53,7 +58,6 @@ export const useSocket = (selectedUser) => {
     socket.emit("send_message", messageObj);
   };
 
-  // --- NEW: Delete Function ---
   const deleteMessage = (messageId) => {
     socket.emit("delete_message", messageId);
   };
@@ -63,20 +67,14 @@ export const useSocket = (selectedUser) => {
     socket.emit("add_reaction", { messageId, emoji, to });
   };
 
-  // --- FIX: Bundle Message + Reply into one encrypted package ---
   const sendPrivateMessage = (to, contentObj) => {
-    // contentObj contains { message: "text", replyTo: {...} }
     const myUsername = users.find((u) => u.id === socket.id)?.username;
     const theirUsername = users.find((u) => u.id === to)?.username;
 
     if (!myUsername || !theirUsername) return;
 
     const key = getChatKey(myUsername, theirUsername);
-
-    // 1. Convert the Object to a String
     const payloadString = JSON.stringify(contentObj);
-
-    // 2. Encrypt the String
     const encrypted = encryptMessage(payloadString, key);
 
     socket.emit("private_message", { to, encrypted });
@@ -99,12 +97,8 @@ export const useSocket = (selectedUser) => {
       setMessages((prev) => [...prev, { ...message, isPrivate: false }]);
     };
 
-    // --- NEW: Listener for Deletion ---
     const onMessageDeleted = (messageId) => {
-      // Remove from Global state
       setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
-
-      // Remove from Private state
       setPrivateMessages((prev) => {
         const updated = { ...prev };
         Object.keys(updated).forEach((userId) => {
@@ -130,7 +124,6 @@ export const useSocket = (selectedUser) => {
 
     const onUserList = (userList) => setUsers(userList);
 
-    // --- FIX: Handle Decryption of Complex Objects ---
     const onPrivateMessage = (data) => {
       const { encrypted, message, senderId, receiverId, ...rest } = data;
       const partnerId = senderId === socket.id ? receiverId : senderId;
@@ -144,17 +137,14 @@ export const useSocket = (selectedUser) => {
       let decryptedText = "";
       let decryptedReplyTo = null;
 
-      // Logic: Try to decrypt -> Parse JSON -> Extract Text & Reply
       if (encrypted) {
         const rawDecrypted = decryptMessage(encrypted, key);
         if (rawDecrypted) {
           try {
-            // Try to parse as JSON (New Format)
             const parsed = JSON.parse(rawDecrypted);
-            decryptedText = parsed.message || parsed; // Handle if it was just a string
+            decryptedText = parsed.message || parsed;
             decryptedReplyTo = parsed.replyTo || null;
           } catch (e) {
-            // If parse fails, it's just a string (Legacy Format)
             decryptedText = rawDecrypted;
           }
         } else {
@@ -171,7 +161,7 @@ export const useSocket = (selectedUser) => {
           {
             ...rest,
             message: decryptedText,
-            replyTo: decryptedReplyTo, // Save the reply data!
+            replyTo: decryptedReplyTo,
             senderId,
             receiverId,
             isPrivate: true,
