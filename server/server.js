@@ -157,7 +157,7 @@ app.get("/api/users", (req, res) => {
   res.json(Object.values(users));
 });
 app.get("/", (req, res) => {
-  res.send("Socket.io Chat Server is running");
+  res.send("StarApp Server is running");
 });
 
 const PORT = process.env.PORT || 5000;
